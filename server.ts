@@ -1,3 +1,4 @@
+import "dotenv/config";
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import Database from "better-sqlite3";
@@ -7,9 +8,20 @@ import { fileURLToPath } from "url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const db = new Database("studyflow.db");
+const isProd = process.env.NODE_ENV === "production";
+console.log(`Starting StudyFlow server in ${isProd ? "production" : "development"} mode...`);
 
-// Initialize Database
+let db: Database.Database;
+try {
+  db = new Database("studyflow.db");
+  console.log("Database initialized successfully.");
+} catch (err) {
+  console.error("Failed to initialize database:", err);
+  db = new Database(":memory:");
+  console.log("Using in-memory database fallback.");
+}
+
+// Initialize Database Schema
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -31,7 +43,7 @@ db.exec(`
     user_id INTEGER,
     subject_id INTEGER,
     duration_seconds INTEGER,
-    type TEXT, -- 'pomodoro', 'manual', 'random'
+    type TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(user_id) REFERENCES users(id),
     FOREIGN KEY(subject_id) REFERENCES subjects(id)
@@ -40,7 +52,7 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS goals (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER,
-    type TEXT, -- 'daily', 'weekly', 'monthly'
+    type TEXT,
     target_seconds INTEGER,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(user_id) REFERENCES users(id)
@@ -58,23 +70,26 @@ async function startServer() {
     const { name } = req.body;
     if (!name) return res.status(400).json({ error: "Name is required" });
 
-    let user = db.prepare("SELECT * FROM users WHERE name = ?").get(name);
-    if (!user) {
-      const result = db.prepare("INSERT INTO users (name) VALUES (?)").run(name);
-      user = { id: result.lastInsertRowid, name };
-      
-      // Add default subjects for new users
-      const defaultSubjects = [
-        { name: 'Physics', category: 'Science', icon: 'Atom' },
-        { name: 'Chemistry', category: 'Science', icon: 'FlaskConical' },
-        { name: 'Math', category: 'Science', icon: 'Calculator' },
-        { name: 'Accounting', category: 'Commerce', icon: 'BookOpen' },
-        { name: 'History', category: 'Arts', icon: 'Scroll' }
-      ];
-      const insertSub = db.prepare("INSERT INTO subjects (user_id, name, category, icon) VALUES (?, ?, ?, ?)");
-      defaultSubjects.forEach(s => insertSub.run(user.id, s.name, s.category, s.icon));
+    try {
+      let user = db.prepare("SELECT * FROM users WHERE name = ?").get(name);
+      if (!user) {
+        const result = db.prepare("INSERT INTO users (name) VALUES (?)").run(name);
+        user = { id: result.lastInsertRowid, name };
+        
+        const defaultSubjects = [
+          { name: 'Physics', category: 'Science', icon: 'Atom' },
+          { name: 'Chemistry', category: 'Science', icon: 'FlaskConical' },
+          { name: 'Math', category: 'Science', icon: 'Calculator' },
+          { name: 'Accounting', category: 'Commerce', icon: 'BookOpen' },
+          { name: 'History', category: 'Arts', icon: 'Scroll' }
+        ];
+        const insertSub = db.prepare("INSERT INTO subjects (user_id, name, category, icon) VALUES (?, ?, ?, ?)");
+        defaultSubjects.forEach(s => insertSub.run(user.id, s.name, s.category, s.icon));
+      }
+      res.json(user);
+    } catch (err) {
+      res.status(500).json({ error: "Database error" });
     }
-    res.json(user);
   });
 
   app.get("/api/subjects/:userId", (req, res) => {
@@ -122,7 +137,7 @@ async function startServer() {
   });
 
   // Vite middleware for development
-  if (process.env.NODE_ENV !== "production") {
+  if (!isProd) {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
@@ -140,4 +155,6 @@ async function startServer() {
   });
 }
 
-startServer();
+startServer().catch(err => {
+  console.error("Failed to start server:", err);
+});
