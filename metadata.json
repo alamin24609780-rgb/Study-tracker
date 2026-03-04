@@ -1,0 +1,7 @@
+{
+  "name": "StudyFlow",
+  "description": "The Ultimate Smart Study Tracker with AI insights, Pomodoro timer, and goal tracking.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
